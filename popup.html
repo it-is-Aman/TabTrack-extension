@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>TabTrack</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>TabTrack</h1>
+        </header>
+        
+        <div class="main-actions">
+            <div class="save-session">
+                <input type="text" id="sessionName" placeholder="Session name">
+                <button id="saveSession">Save Current Tabs</button>
+            </div>
+        </div>
+
+        <div class="sessions-container">
+            <h2>Saved Sessions</h2>
+            <div id="sessionsList"></div>
+        </div>
+
+        <div class="import-export">
+            <input type="file" id="importFile" accept=".json" style="display: none;">
+            <button id="importButton">Import Sessions</button>
+            <button id="exportButton">Export Sessions</button>
+        </div>
+    </div>
+    <script src="popup.js"></script>
+</body>
+</html>
