@@ -106,3 +106,32 @@ h2 {
 .delete-btn:hover {
     background-color: #c0392b;
 }
+
+.session-name {
+    flex: 1;
+    min-width: 0;
+    margin-right: 10px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.empty-state {
+    color: #7f8c8d;
+    font-size: 13px;
+    text-align: center;
+    padding: 10px 0;
+}
+
+.status {
+    min-height: 16px;
+    font-size: 12px;
+}
+
+.status--success {
+    color: #27ae60;
+}
+
+.status--error {
+    color: #c0392b;
+}

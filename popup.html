@@ -1,6 +1,7 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <meta charset="UTF-8">
     <title>TabTrack</title>
     <link rel="stylesheet" href="styles.css">
 </head>
@@ -12,9 +13,10 @@
         
         <div class="main-actions">
             <div class="save-session">
-                <input type="text" id="sessionName" placeholder="Session name">
+                <input type="text" id="sessionName" placeholder="Session name" maxlength="100" autofocus>
                 <button id="saveSession">Save Current Tabs</button>
             </div>
+            <p id="status" class="status" role="status" aria-live="polite"></p>
         </div>
 
         <div class="sessions-container">
