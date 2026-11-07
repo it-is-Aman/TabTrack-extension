@@ -1,14 +1,15 @@
-'use strict';
+/**
+ * TabTrack popup UI. Storage reads/writes go through lib/storage.js;
+ * anything that touches windows is delegated to the background worker.
+ */
+import { MAX_NAME_LENGTH, STORAGE_KEYS } from '../lib/constants.js';
+import { pluralize } from '../lib/format.js';
+import { matchesQuery, mergeImportedSessions, parseSessionsFile } from '../lib/sessions.js';
+import * as storage from '../lib/storage.js';
+import { isRestorableUrl } from '../lib/urls.js';
 
-/** URL schemes Chrome allows an extension to reopen. */
-const RESTORABLE_PROTOCOLS = new Set(['http:', 'https:']);
-const MAX_NAME_LENGTH = 100;
 const STATUS_TIMEOUT_MS = 3000;
 const CONFIRM_TIMEOUT_MS = 3000;
-const TAB_GROUP_COLORS = new Set([
-    'grey', 'blue', 'red', 'yellow', 'green', 'pink', 'purple', 'cyan', 'orange',
-]);
-const DEFAULT_SETTINGS = { lazyRestore: true };
 
 const elements = {};
 
@@ -20,26 +21,31 @@ const dateFormatter = new Intl.DateTimeFormat(undefined, {
     timeStyle: 'short',
 });
 
-document.addEventListener('DOMContentLoaded', () => {
-    elements.sessionName = document.getElementById('sessionName');
-    elements.saveButton = document.getElementById('saveSession');
-    elements.sessionsList = document.getElementById('sessionsList');
-    elements.importButton = document.getElementById('importButton');
-    elements.importFile = document.getElementById('importFile');
-    elements.exportButton = document.getElementById('exportButton');
-    elements.status = document.getElementById('status');
-    elements.searchInput = document.getElementById('searchInput');
-    elements.sessionCount = document.getElementById('sessionCount');
-    elements.recoveryBanner = document.getElementById('recoveryBanner');
-    elements.lazyRestore = document.getElementById('lazyRestore');
-    elements.shortcutHint = document.getElementById('shortcutHint');
+init();
+
+function init() {
+    const byId = (id) => document.getElementById(id);
+    Object.assign(elements, {
+        sessionName: byId('sessionName'),
+        saveButton: byId('saveSession'),
+        sessionsList: byId('sessionsList'),
+        importButton: byId('importButton'),
+        importFile: byId('importFile'),
+        exportButton: byId('exportButton'),
+        status: byId('status'),
+        searchInput: byId('searchInput'),
+        sessionCount: byId('sessionCount'),
+        recoveryBanner: byId('recoveryBanner'),
+        lazyRestore: byId('lazyRestore'),
+        shortcutHint: byId('shortcutHint'),
+    });
 
     setupEventListeners();
     renderSessions();
     renderRecoveryBanner();
     loadSettings();
     renderShortcutHint();
-});
+}
 
 function setupEventListeners() {
     elements.saveButton.addEventListener('click', saveCurrentSession);
@@ -51,59 +57,17 @@ function setupEventListeners() {
     elements.exportButton.addEventListener('click', exportSessions);
     elements.searchInput.addEventListener('input', renderSessions);
     elements.lazyRestore.addEventListener('change', () =>
-        saveSettings({ lazyRestore: elements.lazyRestore.checked })
+        storage.saveSettings({ lazyRestore: elements.lazyRestore.checked })
     );
-}
-
-// ---------------------------------------------------------------------------
-// Storage
-// ---------------------------------------------------------------------------
-
-async function getSessions() {
-    const { sessions } = await chrome.storage.local.get('sessions');
-    return Array.isArray(sessions) ? sessions : [];
-}
-
-async function setSessions(sessions) {
-    await chrome.storage.local.set({ sessions });
-}
-
-async function getSettings() {
-    const { settings } = await chrome.storage.local.get('settings');
-    return { ...DEFAULT_SETTINGS, ...settings };
-}
-
-async function saveSettings(changes) {
-    const settings = await getSettings();
-    await chrome.storage.local.set({ settings: { ...settings, ...changes } });
-}
-
-/** Applies `changes` to the session with the given id and persists it. */
-async function updateSession(id, changes) {
-    const sessions = await getSessions();
-    const session = sessions.find((s) => s.id === id);
-    if (!session) throw new Error(`Session ${id} not found`);
-    Object.assign(session, changes);
-    await setSessions(sessions);
 }
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function isRestorableUrl(url) {
-    if (typeof url !== 'string') return false;
-    try {
-        return RESTORABLE_PROTOCOLS.has(new URL(url).protocol);
-    } catch {
-        return false;
-    }
-}
-
 /**
- * Sends a request to the background service worker, which owns capturing
- * and restoring windows. Resolves with the handler's data or throws an Error
- * whose message is safe to show to the user.
+ * Sends a request to the background service worker. Resolves with the
+ * handler's data or throws an Error whose message is safe to show the user.
  */
 async function sendToBackground(type, payload = {}) {
     const response = await chrome.runtime.sendMessage({ type, ...payload });
@@ -115,14 +79,6 @@ async function getCurrentWindowId() {
     return (await chrome.windows.getCurrent()).id;
 }
 
-function pluralize(count, word) {
-    return `${count} ${word}${count === 1 ? '' : 's'}`;
-}
-
-function byNewestFirst(a, b) {
-    return Date.parse(b.timestamp) - Date.parse(a.timestamp);
-}
-
 function showStatus(message, type = 'success') {
     elements.status.textContent = message;
     elements.status.className = `status status--${type}`;
@@ -131,6 +87,16 @@ function showStatus(message, type = 'success') {
         elements.status.textContent = '';
         elements.status.className = 'status';
     }, STATUS_TIMEOUT_MS);
+}
+
+/** Runs an action; on failure logs it and shows the error message. */
+async function withErrorStatus(label, action) {
+    try {
+        await action();
+    } catch (error) {
+        console.error(`${label} failed:`, error);
+        showStatus(error.message || `${label} failed.`, 'error');
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -145,80 +111,62 @@ async function saveCurrentSession() {
         return;
     }
 
-    try {
+    await withErrorStatus('Save session', async () => {
         const { session, skipped } = await sendToBackground('SAVE_WINDOW', {
             windowId: await getCurrentWindowId(),
             name: name.slice(0, MAX_NAME_LENGTH),
         });
-
         elements.sessionName.value = '';
         const count = pluralize(session.tabs.length, 'tab');
         showStatus(skipped > 0 ? `Saved ${count} (${skipped} browser pages skipped).` : `Saved ${count}.`);
         renderSessions();
-    } catch (error) {
-        console.error('Failed to save session:', error);
-        showStatus(error.message, 'error');
-    }
+    });
 }
 
 /**
  * Restoring runs in the background worker: focusing the new window closes
  * this popup, which would otherwise cut the restore short.
  */
-async function restoreSession(session) {
-    try {
-        await sendToBackground('RESTORE_SESSION', { sessionId: session.id });
-    } catch (error) {
-        console.error('Failed to restore session:', error);
-        showStatus(error.message, 'error');
-    }
+function restoreSession(session) {
+    return withErrorStatus('Restore session', () =>
+        sendToBackground('RESTORE_SESSION', { sessionId: session.id })
+    );
 }
 
-async function restoreRecovery() {
-    try {
-        await sendToBackground('RESTORE_RECOVERY');
-    } catch (error) {
-        console.error('Failed to restore previous browser session:', error);
-        showStatus(error.message, 'error');
-    }
+function restoreRecovery() {
+    return withErrorStatus('Restore previous session', () => sendToBackground('RESTORE_RECOVERY'));
 }
 
 async function dismissRecovery() {
-    await chrome.storage.local.remove('recovery');
+    await chrome.storage.local.remove(STORAGE_KEYS.recovery);
     renderRecoveryBanner();
 }
 
-async function deleteSession(id) {
-    try {
-        const sessions = await getSessions();
-        await setSessions(sessions.filter((session) => session.id !== id));
+function deleteSession(id) {
+    return withErrorStatus('Delete session', async () => {
+        await storage.deleteSession(id);
         showStatus('Session deleted.');
         renderSessions();
-    } catch (error) {
-        console.error('Failed to delete session:', error);
-        showStatus('Could not delete session.', 'error');
-    }
+    });
 }
 
 async function renameSession(id, newName) {
     const name = newName.trim().slice(0, MAX_NAME_LENGTH);
     if (!name) {
         showStatus('Session name cannot be empty.', 'error');
+        renderSessions();
         return;
     }
-    try {
-        await updateSession(id, { name });
+    await withErrorStatus('Rename session', async () => {
+        await storage.updateSession(id, { name });
         showStatus('Session renamed.');
-    } catch (error) {
-        console.error('Failed to rename session:', error);
-        showStatus('Could not rename session.', 'error');
-    }
+    });
     renderSessions();
 }
 
 /** Replaces a session's tabs with the tabs of the current window. */
-async function overwriteSessionTabs(id) {
-    try {
+function overwriteSessionTabs(id) {
+    return withErrorStatus('Update session', async () => {
         const { tabs, groups } = await sendToBackground('CAPTURE_WINDOW', {
             windowId: await getCurrentWindowId(),
         });
@@ -226,22 +174,18 @@ async function overwriteSessionTabs(id) {
             showStatus('No saveable tabs in this window.', 'error');
             return;
         }
-        await updateSession(id, { tabs, groups, updatedAt: new Date().toISOString() });
+        await storage.updateSession(id, { tabs, groups, updatedAt: new Date().toISOString() });
         showStatus(`Session updated with ${pluralize(tabs.length, 'tab')}.`);
         renderSessions();
-    } catch (error) {
-        console.error('Failed to update session:', error);
-        showStatus('Could not update session.', 'error');
-    }
+    });
 }
 
 async function openTab(url) {
-    if (!isRestorableUrl(url)) return;
-    await chrome.tabs.create({ url });
+    if (isRestorableUrl(url)) await chrome.tabs.create({ url });
 }
 
 async function exportSessions() {
-    const sessions = await getSessions();
+    const sessions = await storage.getSessions();
     if (sessions.length === 0) {
         showStatus('No sessions to export.', 'error');
         return;
@@ -257,135 +201,33 @@ async function exportSessions() {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-// ---------------------------------------------------------------------------
-// Import
-// ---------------------------------------------------------------------------
-
-/**
- * Validates one imported session and returns a clean copy, or null if the
- * entry is unusable. Only http(s) URLs are kept.
- */
-function sanitizeSession(raw) {
-    if (!raw || typeof raw !== 'object') return null;
-    if (typeof raw.name !== 'string' || !raw.name.trim()) return null;
-    if (!Array.isArray(raw.tabs)) return null;
-
-    const groups = (Array.isArray(raw.groups) ? raw.groups : [])
-        .filter((group) => group && Number.isInteger(group.id) && TAB_GROUP_COLORS.has(group.color))
-        .map((group) => ({
-            id: group.id,
-            title: typeof group.title === 'string' ? group.title : '',
-            color: group.color,
-            collapsed: Boolean(group.collapsed),
-        }));
-    const groupIds = new Set(groups.map((group) => group.id));
-
-    const tabs = raw.tabs
-        .filter((tab) => tab && isRestorableUrl(tab.url))
-        .map((tab) => {
-            const clean = {
-                url: tab.url,
-                title: typeof tab.title === 'string' ? tab.title : tab.url,
-            };
-            if (tab.pinned === true) clean.pinned = true;
-            if (groupIds.has(tab.groupId)) clean.groupId = tab.groupId;
-            return clean;
-        });
-    if (tabs.length === 0) return null;
-
-    const timestamp = Number.isNaN(Date.parse(raw.timestamp))
-        ? new Date().toISOString()
-        : new Date(raw.timestamp).toISOString();
-
-    const session = {
-        id: typeof raw.id === 'string' && raw.id ? raw.id : crypto.randomUUID(),
-        name: raw.name.trim().slice(0, MAX_NAME_LENGTH),
-        timestamp,
-        tabs,
-    };
-    const usedGroups = groups.filter((group) => tabs.some((tab) => tab.groupId === group.id));
-    if (usedGroups.length > 0) session.groups = usedGroups;
-    return session;
-}
-
-function sessionKey(session) {
-    return `${session.name}|${session.timestamp}`;
-}
-
 async function handleImport(event) {
     const file = event.target.files[0];
     event.target.value = ''; // allow re-importing the same file
     if (!file) return;
 
-    let parsed;
-    try {
-        parsed = JSON.parse(await file.text());
-    } catch {
-        showStatus('Invalid file: not valid JSON.', 'error');
-        return;
-    }
-
-    if (!Array.isArray(parsed)) {
-        showStatus('Invalid file: expected a list of sessions.', 'error');
-        return;
-    }
-
-    try {
-        const current = await getSessions();
-        const knownIds = new Set(current.map((s) => s.id));
-        const knownKeys = new Set(current.map(sessionKey));
-
-        let added = 0;
-        let skipped = 0;
-        for (const raw of parsed) {
-            const session = sanitizeSession(raw);
-            if (!session || knownKeys.has(sessionKey(session))) {
-                skipped++;
-                continue;
-            }
-            if (knownIds.has(session.id)) session.id = crypto.randomUUID();
-
-            knownIds.add(session.id);
-            knownKeys.add(sessionKey(session));
-            current.push(session);
-            added++;
-        }
-
-        current.sort(byNewestFirst);
-        await setSessions(current);
+    await withErrorStatus('Import sessions', async () => {
+        const imported = parseSessionsFile(await file.text());
+        const { sessions, added, skipped } = mergeImportedSessions(await storage.getSessions(), imported);
+        await storage.setSessions(sessions);
         renderSessions();
 
         if (added === 0) {
             showStatus('No new sessions found in file.', 'error');
         } else {
-            showStatus(
-                skipped > 0
-                    ? `Imported ${added} sessions (${skipped} skipped).`
-                    : `Imported ${added} sessions.`
-            );
+            const summary = `Imported ${pluralize(added, 'session')}`;
+            showStatus(skipped > 0 ? `${summary} (${skipped} skipped).` : `${summary}.`);
         }
-    } catch (error) {
-        console.error('Failed to import sessions:', error);
-        showStatus('Could not import sessions.', 'error');
-    }
+    });
 }
 
 // ---------------------------------------------------------------------------
 // Rendering
 // ---------------------------------------------------------------------------
 
-function matchesQuery(session, query) {
-    if (!query) return true;
-    const haystack = [
-        session.name,
-        ...session.tabs.flatMap((tab) => [tab.title, tab.url]),
-    ];
-    return haystack.some((text) => String(text).toLowerCase().includes(query));
-}
-
 async function renderSessions() {
-    const sessions = await getSessions();
-    const query = elements.searchInput.value.trim().toLowerCase();
+    const sessions = await storage.getSessions();
+    const query = elements.searchInput.value;
     const visible = sessions.filter((session) => matchesQuery(session, query));
 
     elements.sessionCount.textContent = sessions.length ? `(${sessions.length})` : '';
@@ -581,7 +423,7 @@ function confirmClick(button, armedLabel, action) {
 // ---------------------------------------------------------------------------
 
 async function renderRecoveryBanner() {
-    const { recovery } = await chrome.storage.local.get('recovery');
+    const { [STORAGE_KEYS.recovery]: recovery } = await chrome.storage.local.get(STORAGE_KEYS.recovery);
     const banner = elements.recoveryBanner;
     banner.replaceChildren();
     banner.hidden = !recovery?.windows?.length;
@@ -603,7 +445,7 @@ async function renderRecoveryBanner() {
 }
 
 async function loadSettings() {
-    const { lazyRestore } = await getSettings();
+    const { lazyRestore } = await storage.getSettings();
     elements.lazyRestore.checked = lazyRestore;
 }
 
