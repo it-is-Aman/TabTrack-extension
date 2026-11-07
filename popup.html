@@ -11,6 +11,8 @@
             <h1>TabTrack</h1>
         </header>
 
+        <div id="recoveryBanner" class="recovery-banner" role="region" aria-label="Recover previous session" hidden></div>
+
         <div class="main-actions">
             <div class="save-session">
                 <input type="text" id="sessionName" placeholder="Session name" maxlength="100" autofocus>
@@ -32,6 +34,14 @@
             <button id="importButton">Import Sessions</button>
             <button id="exportButton">Export Sessions</button>
         </div>
+
+        <footer class="footer">
+            <label class="setting">
+                <input type="checkbox" id="lazyRestore">
+                Load restored tabs only when opened (saves memory)
+            </label>
+            <p id="shortcutHint" class="hint"></p>
+        </footer>
     </div>
     <script src="popup.js"></script>
 </body>

@@ -234,3 +234,72 @@ h2 {
 .status--error {
     color: #c0392b;
 }
+
+.recovery-banner {
+    padding: 10px;
+    margin-bottom: 15px;
+    background-color: #fff8e1;
+    border: 1px solid #f5d76e;
+    border-radius: 4px;
+    font-size: 12px;
+    color: #5d4a00;
+}
+
+.recovery-actions {
+    display: flex;
+    gap: 5px;
+    margin-top: 8px;
+}
+
+.recovery-actions button {
+    padding: 5px 10px;
+    font-size: 12px;
+}
+
+.group-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    margin-right: 5px;
+    border-radius: 50%;
+    vertical-align: middle;
+}
+
+.group-dot--grey { background-color: #5f6368; }
+.group-dot--blue { background-color: #1a73e8; }
+.group-dot--red { background-color: #d93025; }
+.group-dot--yellow { background-color: #f9ab00; }
+.group-dot--green { background-color: #188038; }
+.group-dot--pink { background-color: #d01884; }
+.group-dot--purple { background-color: #a142f4; }
+.group-dot--cyan { background-color: #007b83; }
+.group-dot--orange { background-color: #fa903e; }
+
+.pin-icon {
+    margin-right: 4px;
+    font-size: 10px;
+}
+
+.footer {
+    margin-top: 15px;
+    padding-top: 10px;
+    border-top: 1px solid #e5e8eb;
+    font-size: 12px;
+    color: #5f6b7a;
+}
+
+.setting {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+}
+
+.hint {
+    margin-top: 6px;
+    color: #95a5a6;
+}
+
+.hint:empty {
+    display: none;
+}

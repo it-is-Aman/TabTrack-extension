@@ -5,6 +5,10 @@ const RESTORABLE_PROTOCOLS = new Set(['http:', 'https:']);
 const MAX_NAME_LENGTH = 100;
 const STATUS_TIMEOUT_MS = 3000;
 const CONFIRM_TIMEOUT_MS = 3000;
+const TAB_GROUP_COLORS = new Set([
+    'grey', 'blue', 'red', 'yellow', 'green', 'pink', 'purple', 'cyan', 'orange',
+]);
+const DEFAULT_SETTINGS = { lazyRestore: true };
 
 const elements = {};
 
@@ -26,9 +30,15 @@ document.addEventListener('DOMContentLoaded', () => {
     elements.status = document.getElementById('status');
     elements.searchInput = document.getElementById('searchInput');
     elements.sessionCount = document.getElementById('sessionCount');
+    elements.recoveryBanner = document.getElementById('recoveryBanner');
+    elements.lazyRestore = document.getElementById('lazyRestore');
+    elements.shortcutHint = document.getElementById('shortcutHint');
 
     setupEventListeners();
     renderSessions();
+    renderRecoveryBanner();
+    loadSettings();
+    renderShortcutHint();
 });
 
 function setupEventListeners() {
@@ -40,6 +50,9 @@ function setupEventListeners() {
     elements.importFile.addEventListener('change', handleImport);
     elements.exportButton.addEventListener('click', exportSessions);
     elements.searchInput.addEventListener('input', renderSessions);
+    elements.lazyRestore.addEventListener('change', () =>
+        saveSettings({ lazyRestore: elements.lazyRestore.checked })
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -53,6 +66,16 @@ async function getSessions() {
 
 async function setSessions(sessions) {
     await chrome.storage.local.set({ sessions });
+}
+
+async function getSettings() {
+    const { settings } = await chrome.storage.local.get('settings');
+    return { ...DEFAULT_SETTINGS, ...settings };
+}
+
+async function saveSettings(changes) {
+    const settings = await getSettings();
+    await chrome.storage.local.set({ settings: { ...settings, ...changes } });
 }
 
 /** Applies `changes` to the session with the given id and persists it. */
@@ -77,13 +100,19 @@ function isRestorableUrl(url) {
     }
 }
 
-/** Returns the restorable tabs of the current window plus a skipped count. */
-async function captureCurrentWindow() {
-    const tabs = await chrome.tabs.query({ currentWindow: true });
-    const restorable = tabs
-        .filter((tab) => isRestorableUrl(tab.url))
-        .map((tab) => ({ url: tab.url, title: tab.title || tab.url }));
-    return { tabs: restorable, skipped: tabs.length - restorable.length };
+/**
+ * Sends a request to the background service worker, which owns capturing
+ * and restoring windows. Resolves with the handler's data or throws an Error
+ * whose message is safe to show to the user.
+ */
+async function sendToBackground(type, payload = {}) {
+    const response = await chrome.runtime.sendMessage({ type, ...payload });
+    if (!response?.ok) throw new Error(response?.error || 'Something went wrong.');
+    return response.data;
+}
+
+async function getCurrentWindowId() {
+    return (await chrome.windows.getCurrent()).id;
 }
 
 function pluralize(count, word) {
@@ -117,52 +146,46 @@ async function saveCurrentSession() {
     }
 
     try {
-        const { tabs: restorableTabs, skipped } = await captureCurrentWindow();
-
-        if (restorableTabs.length === 0) {
-            showStatus('No saveable tabs in this window.', 'error');
-            return;
-        }
-
-        const session = {
-            id: crypto.randomUUID(),
+        const { session, skipped } = await sendToBackground('SAVE_WINDOW', {
+            windowId: await getCurrentWindowId(),
             name: name.slice(0, MAX_NAME_LENGTH),
-            timestamp: new Date().toISOString(),
-            tabs: restorableTabs,
-        };
-
-        const sessions = await getSessions();
-        sessions.unshift(session); // newest first
-        await setSessions(sessions);
+        });
 
         elements.sessionName.value = '';
-        showStatus(
-            skipped > 0
-                ? `Saved ${pluralize(restorableTabs.length, 'tab')} (${skipped} browser pages skipped).`
-                : `Saved ${pluralize(restorableTabs.length, 'tab')}.`
-        );
+        const count = pluralize(session.tabs.length, 'tab');
+        showStatus(skipped > 0 ? `Saved ${count} (${skipped} browser pages skipped).` : `Saved ${count}.`);
         renderSessions();
     } catch (error) {
         console.error('Failed to save session:', error);
-        showStatus('Could not save session.', 'error');
+        showStatus(error.message, 'error');
     }
 }
 
+/**
+ * Restoring runs in the background worker: focusing the new window closes
+ * this popup, which would otherwise cut the restore short.
+ */
 async function restoreSession(session) {
-    const urls = session.tabs.map((tab) => tab.url).filter(isRestorableUrl);
-    if (urls.length === 0) {
-        showStatus('This session has no restorable tabs.', 'error');
-        return;
-    }
-
-    // Create the window with all tabs in a single call. Focusing the new
-    // window closes this popup, so no work may happen after this await.
     try {
-        await chrome.windows.create({ url: urls, focused: true });
+        await sendToBackground('RESTORE_SESSION', { sessionId: session.id });
     } catch (error) {
         console.error('Failed to restore session:', error);
-        showStatus('Could not restore session.', 'error');
+        showStatus(error.message, 'error');
     }
+}
+
+async function restoreRecovery() {
+    try {
+        await sendToBackground('RESTORE_RECOVERY');
+    } catch (error) {
+        console.error('Failed to restore previous browser session:', error);
+        showStatus(error.message, 'error');
+    }
+}
+
+async function dismissRecovery() {
+    await chrome.storage.local.remove('recovery');
+    renderRecoveryBanner();
 }
 
 async function deleteSession(id) {
@@ -196,12 +219,14 @@ async function renameSession(id, newName) {
 /** Replaces a session's tabs with the tabs of the current window. */
 async function overwriteSessionTabs(id) {
     try {
-        const { tabs } = await captureCurrentWindow();
+        const { tabs, groups } = await sendToBackground('CAPTURE_WINDOW', {
+            windowId: await getCurrentWindowId(),
+        });
         if (tabs.length === 0) {
             showStatus('No saveable tabs in this window.', 'error');
             return;
         }
-        await updateSession(id, { tabs, updatedAt: new Date().toISOString() });
+        await updateSession(id, { tabs, groups, updatedAt: new Date().toISOString() });
         showStatus(`Session updated with ${pluralize(tabs.length, 'tab')}.`);
         renderSessions();
     } catch (error) {
@@ -245,24 +270,42 @@ function sanitizeSession(raw) {
     if (typeof raw.name !== 'string' || !raw.name.trim()) return null;
     if (!Array.isArray(raw.tabs)) return null;
 
+    const groups = (Array.isArray(raw.groups) ? raw.groups : [])
+        .filter((group) => group && Number.isInteger(group.id) && TAB_GROUP_COLORS.has(group.color))
+        .map((group) => ({
+            id: group.id,
+            title: typeof group.title === 'string' ? group.title : '',
+            color: group.color,
+            collapsed: Boolean(group.collapsed),
+        }));
+    const groupIds = new Set(groups.map((group) => group.id));
+
     const tabs = raw.tabs
         .filter((tab) => tab && isRestorableUrl(tab.url))
-        .map((tab) => ({
-            url: tab.url,
-            title: typeof tab.title === 'string' ? tab.title : tab.url,
-        }));
+        .map((tab) => {
+            const clean = {
+                url: tab.url,
+                title: typeof tab.title === 'string' ? tab.title : tab.url,
+            };
+            if (tab.pinned === true) clean.pinned = true;
+            if (groupIds.has(tab.groupId)) clean.groupId = tab.groupId;
+            return clean;
+        });
     if (tabs.length === 0) return null;
 
     const timestamp = Number.isNaN(Date.parse(raw.timestamp))
         ? new Date().toISOString()
         : new Date(raw.timestamp).toISOString();
 
-    return {
+    const session = {
         id: typeof raw.id === 'string' && raw.id ? raw.id : crypto.randomUUID(),
         name: raw.name.trim().slice(0, MAX_NAME_LENGTH),
         timestamp,
         tabs,
     };
+    const usedGroups = groups.filter((group) => tabs.some((tab) => tab.groupId === group.id));
+    if (usedGroups.length > 0) session.groups = usedGroups;
+    return session;
 }
 
 function sessionKey(session) {
@@ -407,7 +450,10 @@ function createSessionElement(session) {
     const meta = document.createElement('span');
     meta.className = 'session-meta';
     const savedAt = session.updatedAt || session.timestamp;
-    meta.textContent = `${pluralize(session.tabs.length, 'tab')} · ${dateFormatter.format(new Date(savedAt))}`;
+    const metaParts = [pluralize(session.tabs.length, 'tab')];
+    if (session.groups?.length) metaParts.push(pluralize(session.groups.length, 'group'));
+    metaParts.push(dateFormatter.format(new Date(savedAt)));
+    meta.textContent = metaParts.join(' · ');
 
     info.append(name, meta);
 
@@ -428,8 +474,25 @@ function createSessionDetails(session, info, nameElement) {
 
     const tabList = document.createElement('ul');
     tabList.className = 'tab-list';
+    const groupsById = new Map((session.groups || []).map((group) => [group.id, group]));
     for (const tab of session.tabs) {
         const li = document.createElement('li');
+
+        const group = groupsById.get(tab.groupId);
+        if (group) {
+            const dot = document.createElement('span');
+            dot.className = `group-dot group-dot--${group.color}`;
+            dot.title = group.title ? `Group: ${group.title}` : 'Tab group';
+            li.appendChild(dot);
+        }
+        if (tab.pinned) {
+            const pin = document.createElement('span');
+            pin.className = 'pin-icon';
+            pin.textContent = '📌';
+            pin.title = 'Pinned tab';
+            li.appendChild(pin);
+        }
+
         const link = document.createElement('a');
         link.href = tab.url;
         link.textContent = tab.title || tab.url;
@@ -511,4 +574,43 @@ function confirmClick(button, armedLabel, action) {
             button.textContent = originalLabel;
         }, CONFIRM_TIMEOUT_MS)
     );
+}
+
+// ---------------------------------------------------------------------------
+// Recovery banner, settings, shortcut hint
+// ---------------------------------------------------------------------------
+
+async function renderRecoveryBanner() {
+    const { recovery } = await chrome.storage.local.get('recovery');
+    const banner = elements.recoveryBanner;
+    banner.replaceChildren();
+    banner.hidden = !recovery?.windows?.length;
+    if (banner.hidden) return;
+
+    const tabCount = recovery.windows.reduce((sum, win) => sum + win.tabs.length, 0);
+    const text = document.createElement('p');
+    text.textContent =
+        `Previous browser session: ${pluralize(recovery.windows.length, 'window')}, ` +
+        `${pluralize(tabCount, 'tab')} (${dateFormatter.format(new Date(recovery.timestamp))}).`;
+
+    const actions = document.createElement('div');
+    actions.className = 'recovery-actions';
+    actions.append(
+        createButton('Restore', '', restoreRecovery),
+        createButton('Dismiss', 'secondary-btn', dismissRecovery)
+    );
+    banner.append(text, actions);
+}
+
+async function loadSettings() {
+    const { lazyRestore } = await getSettings();
+    elements.lazyRestore.checked = lazyRestore;
+}
+
+async function renderShortcutHint() {
+    const commands = await chrome.commands.getAll();
+    const quickSave = commands.find((command) => command.name === 'quick-save');
+    elements.shortcutHint.textContent = quickSave?.shortcut
+        ? `Tip: press ${quickSave.shortcut} to quick-save this window.`
+        : '';
 }
