@@ -10,7 +10,7 @@
         <header>
             <h1>TabTrack</h1>
         </header>
-        
+
         <div class="main-actions">
             <div class="save-session">
                 <input type="text" id="sessionName" placeholder="Session name" maxlength="100" autofocus>
@@ -20,12 +20,15 @@
         </div>
 
         <div class="sessions-container">
-            <h2>Saved Sessions</h2>
+            <div class="sessions-header">
+                <h2>Saved Sessions <span id="sessionCount" class="count"></span></h2>
+            </div>
+            <input type="search" id="searchInput" class="search-input" placeholder="Search sessions or tabs…" aria-label="Search sessions" hidden>
             <div id="sessionsList"></div>
         </div>
 
         <div class="import-export">
-            <input type="file" id="importFile" accept=".json" style="display: none;">
+            <input type="file" id="importFile" accept=".json,application/json" hidden>
             <button id="importButton">Import Sessions</button>
             <button id="exportButton">Export Sessions</button>
         </div>

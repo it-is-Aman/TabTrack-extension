@@ -5,7 +5,7 @@
 }
 
 body {
-    width: 350px;
+    width: 380px;
     font-family: Arial, sans-serif;
     padding: 15px;
     background-color: #f5f5f5;
@@ -55,6 +55,12 @@ button {
     transition: background-color 0.3s;
 }
 
+button:focus-visible,
+input:focus-visible {
+    outline: 2px solid #2980b9;
+    outline-offset: 1px;
+}
+
 button:hover {
     background-color: #2980b9;
 }
@@ -70,18 +76,113 @@ h2 {
 }
 
 .session-item {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 10px;
+    padding: 8px 10px;
     background-color: #f8f9fa;
     border-radius: 4px;
     margin-bottom: 8px;
 }
 
-.session-actions {
+.session-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.session-toggle {
+    padding: 2px 6px;
+    background: none;
+    color: #7f8c8d;
+    font-size: 14px;
+}
+
+.session-toggle:hover {
+    background-color: #ecf0f1;
+}
+
+.session-info {
+    display: flex;
+    flex: 1;
+    min-width: 0;
+    flex-direction: column;
+}
+
+.session-meta {
+    font-size: 11px;
+    color: #7f8c8d;
+    margin-top: 2px;
+}
+
+.rename-input {
+    padding: 4px 6px !important;
+    font-size: 13px;
+}
+
+.session-details {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid #e5e8eb;
+}
+
+.tab-list {
+    list-style: none;
+    max-height: 160px;
+    overflow-y: auto;
+    margin-bottom: 8px;
+}
+
+.tab-list li {
+    padding: 3px 0;
+    font-size: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.tab-list a {
+    color: #2c3e50;
+    text-decoration: none;
+}
+
+.tab-list a:hover {
+    color: #3498db;
+    text-decoration: underline;
+}
+
+.session-toolbar {
     display: flex;
     gap: 5px;
+}
+
+.session-toolbar button {
+    padding: 5px 8px;
+    font-size: 12px;
+}
+
+.secondary-btn {
+    background-color: #95a5a6;
+}
+
+.secondary-btn:hover {
+    background-color: #7f8c8d;
+}
+
+.sessions-header h2 .count {
+    font-size: 13px;
+    font-weight: normal;
+    color: #7f8c8d;
+}
+
+.search-input {
+    width: 100%;
+    padding: 6px 8px;
+    margin-bottom: 10px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+}
+
+#sessionsList {
+    max-height: 340px;
+    overflow-y: auto;
 }
 
 .import-export {
@@ -108,9 +209,7 @@ h2 {
 }
 
 .session-name {
-    flex: 1;
-    min-width: 0;
-    margin-right: 10px;
+    font-size: 14px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
