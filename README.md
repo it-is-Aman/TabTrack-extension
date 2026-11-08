@@ -19,11 +19,13 @@ with tab-group support, lazy loading and crash recovery.
   current tabs, delete (with confirmation) and search by name, title or URL.
 - **Import / export** as JSON, with schema validation, duplicate detection and
   http(s)-only URL filtering.
-- **Private by design**: everything stays in local storage. See [PRIVACY.md](PRIVACY.md).
+- **Private by design**: everything stays in local storage. See the [privacy policy](privacy-policy.md).
 
 ## Install for development
 
 ```bash
+git clone https://github.com/it-is-Aman/TabTrack-extension.git
+cd TabTrack-extension
 npm install
 ```
 
@@ -112,6 +114,16 @@ newest-first ordering).
 
 See [CHANGELOG.md](CHANGELOG.md).
 
+## Roadmap
+
+- Optional cloud sync between devices
+- Firefox and Edge support
+
+## Contributing
+
+Contributions are welcome! Fork the repository, create a branch, and open a pull
+request. Please run `npm run lint` and `npm test` before submitting.
+
 ## License
 
-MIT
+[MIT](LICENSE) © 2025 Aman Rajput

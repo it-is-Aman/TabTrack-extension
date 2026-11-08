@@ -2,3 +2,7 @@ node_modules/
 dist/
 coverage/
 .DS_Store
+
+# Local media (recordings, exported videos, store images)
+*.mov
+*.mp4
