@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "TabTrack - Tab Session Manager",
-  "description": "Group, save, and restore your browser tabs as sessions.",
+  "description": "Save, organize and restore tab sessions with tab groups, lazy loading and crash recovery.",
   "version": "1.3.0",
   "permissions": [
     "tabs",

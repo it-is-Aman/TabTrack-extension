@@ -3,7 +3,9 @@
 A Manifest V3 Chrome extension to save, organise and restore browser tab sessions,
 with tab-group support, lazy loading and crash recovery.
 
-<!-- TODO: add Chrome Web Store link and screenshots/GIF -->
+![TabTrack running in Chrome](store-assets/screenshot-1-in-browser.png)
+
+<!-- TODO: add Chrome Web Store link -->
 
 ## Features
 
